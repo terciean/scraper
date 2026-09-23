@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Same reasoning as cli.js: shell:true is required for codex/claude/npm .cmd
+// shims on Windows, and every arg we pass is our own -- never user input.
+process.noDeprecation = true;
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
@@ -31,6 +34,23 @@ function heading(text) { console.log(`\n== ${text} ==`); }
 function ok(text) { console.log(`  OK  ${text}`); }
 function fail(text) { console.log(`  !!  ${text}`); }
 
+// Package downloads (npm installs, the Playwright/Codex binaries) are the
+// single flakiest step on a fresh machine -- a dropped connection or an AV
+// scan can corrupt or silently skip a download. One quiet retry clears most
+// of these; a real failure still surfaces with a clear, actionable message.
+function runRetryOrExit(command, args, { label } = {}) {
+  let res = run(command, args);
+  if (res.status !== 0) {
+    console.log(`\n  That failed, retrying once (${label ?? command}) ...`);
+    res = run(command, args);
+  }
+  if (res.status !== 0) {
+    fail(`${label ?? command} failed twice. Check your internet connection, then run this command yourself: ${command} ${args.join(' ')}`);
+    process.exit(res.status ?? 1);
+  }
+  return res;
+}
+
 const [major, minor] = process.versions.node.split('.').map(Number);
 if (major < 22 || (major === 22 && minor < 13)) {
   fail(`Node ${process.versions.node} is too old. Install Node 22.13 or newer.`);
@@ -44,34 +64,44 @@ mkdirSync(join(ROOT, 'data'), { recursive: true });
 
 if (install) {
   heading('Install app dependencies');
-  const deps = run(exe('npm'), ['install']);
-  if (deps.status !== 0) process.exit(deps.status ?? 1);
+  runRetryOrExit(exe('npm'), ['install'], { label: 'npm install' });
 
   heading('Install browser used by the scraper');
-  const browser = run(exe('npx'), ['playwright', 'install', 'chromium']);
-  if (browser.status !== 0) process.exit(browser.status ?? 1);
+  runRetryOrExit(exe('npx'), ['playwright', 'install', 'chromium'], { label: 'playwright install chromium' });
 }
 
 heading('ChatGPT / Codex connection');
-if (!commandWorks('codex', ['--version'])) {
-  if (checkOnly) fail('Codex CLI is not installed. Run npm run onboard.');
-  else {
-    console.log('  Installing the official Codex CLI...');
-    const added = run(exe('npm'), ['install', '-g', '@openai/codex']);
-    if (added.status !== 0) process.exit(added.status ?? 1);
+if (install && !commandWorks('codex', ['--version'])) {
+  console.log('  Installing the official Codex CLI...');
+  runRetryOrExit(exe('npm'), ['install', '-g', '@openai/codex'], { label: 'npm install -g @openai/codex' });
+
+  // Known Windows issue: npm can exit 0 while silently failing to install
+  // the platform-specific optional dependency, leaving a `codex` shim that
+  // throws instead of running. One more reinstall usually clears it.
+  if (!commandWorks('codex', ['--version'])) {
+    console.log('  Codex installed but will not run yet -- reinstalling once more...');
+    run(exe('npm'), ['install', '-g', '@openai/codex']);
   }
 }
 
-if (commandWorks('codex', ['--version'])) {
+// A broken/unsigned-in Codex never blocks the rest of setup -- qualification
+// and reply classification fall back to the local regex matcher without it,
+// so WhatsApp pairing and everything else below should still proceed.
+if (!commandWorks('codex', ['--version'])) {
+  fail('Codex CLI is not installed or will not run. Continuing without it -- fix later with: npm install -g @openai/codex, then npm run doctor.');
+} else {
+  ok('Codex CLI installed');
   if (!commandWorks('codex', ['login', 'status'])) {
-    if (checkOnly) fail('Codex is installed but not signed in. Run codex login.');
+    if (checkOnly) fail('Codex is installed but not signed in. Run: codex login');
     else {
       console.log('  Your browser will open. Sign in with the ChatGPT account for this machine.');
       const login = run('codex', ['login']);
-      if (login.status !== 0) process.exit(login.status ?? 1);
+      if (login.status === 0 && commandWorks('codex', ['login', 'status'])) ok('Codex is signed in');
+      else fail('Codex sign-in did not complete. Continuing without it -- fix later with: codex login');
     }
+  } else {
+    ok('Codex is signed in');
   }
-  if (commandWorks('codex', ['login', 'status'])) ok('Codex is signed in');
 }
 
 if (!existsSync(join(ROOT, 'node_modules'))) fail('Dependencies are missing. Run npm run onboard.');

@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+// spawnSync must run codex/claude through a shell on Windows (they resolve
+// to .cmd shims); Node's shell-arg deprecation warning is noise here since
+// every argument we pass is our own, never user-controlled.
+process.noDeprecation = true;
 import './src/migrate.js';
 import { db } from './src/db.js';
 import { config, setBatchSize } from './src/config.js';
