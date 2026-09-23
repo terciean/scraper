@@ -1,0 +1,29 @@
+{
+  "name": "scrape-and-messenger",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Google Maps lead scraper + two-step WhatsApp outreach sequencer",
+  "scripts": {
+    "onboard": "node scripts/onboard.mjs --install",
+    "doctor": "node scripts/onboard.mjs --check",
+    "pair-whatsapp": "node cli.js whatsapp-pair",
+    "scrape": "node cli.js scrape",
+    "pipeline": "node cli.js pipeline",
+    "send": "node cli.js send",
+    "listen": "node cli.js listen",
+    "stats": "node cli.js stats",
+    "review": "node cli.js review",
+    "export": "node cli.js export",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "libphonenumber-js": "^1.11.17",
+    "playwright": "^1.49.1",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.26.0"
+  }
+}
